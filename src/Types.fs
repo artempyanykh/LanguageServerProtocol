@@ -69,7 +69,7 @@ type DocumentSelector = DocumentFilter[]
 
 /// Position in a text document expressed as zero-based line and zero-based character offset.
 /// A position is between two characters like an ‘insert’ cursor in a editor.
-[<DebuggerDisplay("{DebuggerDisplay}")>]
+[<StructuredFormatDisplay("{DebuggerDisplay}")>]
 type Position =
   {
     /// Line position in a document (zero-based).
@@ -86,6 +86,7 @@ type Position =
 
   [<DebuggerBrowsable(DebuggerBrowsableState.Never); JsonIgnore>]
   member x.DebuggerDisplay = $"({x.Line},{x.Character})"
+  override x.ToString() = x.DebuggerDisplay
 
 /// A range in a text document expressed as (zero-based) start and end positions.
 /// A range is comparable to a selection in an editor. Therefore the end position is exclusive.
@@ -99,7 +100,7 @@ type Position =
 ///     End = { Line = 6; character = 0 }
 /// }
 /// ```
-[<DebuggerDisplay("{DebuggerDisplay}")>]
+[<StructuredFormatDisplay("{DebuggerDisplay}")>]
 type Range =
   {
     /// The range's start position.
@@ -111,6 +112,7 @@ type Range =
 
   [<DebuggerBrowsable(DebuggerBrowsableState.Never); JsonIgnore>]
   member x.DebuggerDisplay = $"{x.Start.DebuggerDisplay}-{x.End.DebuggerDisplay}"
+  override x.ToString() = x.DebuggerDisplay
 
 type DocumentUri = string
 
@@ -312,6 +314,50 @@ type TextDocumentEdit =
     /// The edits to be applied.
     Edits: TextEdit[]
   }
+
+/// Create file operation
+type CreateFile =
+  { /// The kind of resource operation. This should always be `"create"`.
+    Kind: string
+
+    /// The resource to create.
+    Uri: DocumentUri
+  }
+
+/// Rename file operation
+type RenameFile =
+  { /// The kind of resource operation. This should always be `"rename"`.
+    Kind: string
+
+    /// The old (existing) location.
+    oldUri: DocumentUri
+
+    /// The new location.
+    newUri: DocumentUri
+  }
+
+/// Delete file operation
+type DeleteFile =
+  { /// The kind of resource operation. This should always be `"delete"`.
+    Kind: string
+
+    /// The file to delete.
+    Uri: DocumentUri
+  }
+
+
+/// Represents the possible values in the `WorkspaceEdit`'s `DocumentChanges` field.
+[<ErasedUnion>]
+type DocumentChange =
+  | TextDocumentEdit of TextDocumentEdit
+  | CreateFile of CreateFile
+  | RenameFile of RenameFile
+  | DeleteFile of DeleteFile
+
+module DocumentChange =
+    let createFile uri = DocumentChange.CreateFile {Kind = "create"; Uri = uri}
+    let renameFile oldUri newUri = DocumentChange.RenameFile {Kind = "rename"; oldUri = oldUri; newUri = newUri}
+    let deleteFile uri = DocumentChange.DeleteFile {Kind = "delete"; Uri = uri}
 
 type TraceSetting =
   | Off = 0
@@ -1895,12 +1941,15 @@ type WorkspaceEdit =
     /// where each text document edit addresses a specific version of a text document.
     /// Whether a client supports versioned document edits is expressed via
     /// `WorkspaceClientCapabilities.workspaceEdit.documentChanges`.
-    DocumentChanges: TextDocumentEdit[] option
+    DocumentChanges: DocumentChange[] option
   }
 
-  static member DocumentChangesToChanges(edits: TextDocumentEdit[]) =
+  static member DocumentChangesToChanges(edits: DocumentChange[]) =
     edits
-    |> Array.map (fun edit -> edit.TextDocument.Uri.ToString(), edit.Edits)
+    |> Array.collect (fun docChange ->
+                       match docChange with
+                       | TextDocumentEdit edit -> [|edit.TextDocument.Uri.ToString(), edit.Edits|]
+                       | _ -> [||])
     |> Map.ofArray
 
   static member CanUseDocumentChanges(capabilities: ClientCapabilities) =
@@ -1908,11 +1957,11 @@ type WorkspaceEdit =
      |> Option.bind (fun x -> x.WorkspaceEdit)
      |> Option.bind (fun x -> x.DocumentChanges)) = Some true
 
-  static member Create(edits: TextDocumentEdit[], capabilities: ClientCapabilities) =
+  static member Create(documentChanges: DocumentChange[], capabilities: ClientCapabilities) =
     if WorkspaceEdit.CanUseDocumentChanges(capabilities) then
-      { Changes = None; DocumentChanges = Some edits }
+      { Changes = None; DocumentChanges = Some documentChanges }
     else
-      { Changes = Some(WorkspaceEdit.DocumentChangesToChanges edits)
+      { Changes = Some(WorkspaceEdit.DocumentChangesToChanges documentChanges)
         DocumentChanges = None }
 
 type MessageType =
@@ -2681,7 +2730,7 @@ type CodeDescription =
 
 /// Represents a diagnostic, such as a compiler error or warning. Diagnostic objects are only valid in the
 /// scope of a resource.
-[<DebuggerDisplay("{DebuggerDisplay}")>]
+[<StructuredFormatDisplay("{DebuggerDisplay}")>]
 type Diagnostic =
   {
     /// The range at which the message applies.
@@ -2713,6 +2762,8 @@ type Diagnostic =
   [<DebuggerBrowsable(DebuggerBrowsableState.Never); JsonIgnore>]
   member x.DebuggerDisplay =
     $"[{defaultArg x.Severity DiagnosticSeverity.Error}] ({x.Range.DebuggerDisplay}) {x.Message} ({defaultArg x.Code String.Empty})"
+
+  override x.ToString() = x.DebuggerDisplay
 
 type PublishDiagnosticsParams =
   {
